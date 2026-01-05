@@ -48,6 +48,8 @@ CreateClientConVar("ml_aimbot_fov", 180, true, false, "Aimbot FOV")
 CreateClientConVar("ml_health_ammo", 1, true, false)
 CreateClientConVar("ml_prop_hitsounds", 1, true, false)
 CreateClientConVar("ml_silent_aim", 0, true, false)
+CreateClientConVar("ml_rcs", 0, true, false)
+CreateClientConVar("ml_rcs_strength", 1, true, false)
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
 surface.CreateFont("ML_Subtitle", {font = "Verdana", size = 14, weight = 700, antialias = true})
@@ -155,6 +157,7 @@ local function UnhookMatcha()
         {"HUDPaint", "ML_HealthAmmo"},
         {"HUDShouldDraw", "ML_HideDefaultHUD"},
         {"entity_killed", "ML_PropHitsound"},
+        {"CreateMove", "ML_RecoilControl"},
     }
 
     for _, v in pairs(hooks) do
@@ -653,7 +656,6 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
         local targetPos
         local isSilent = GetConVarNumber("ml_silent_aim") == 1
         
-        -- Use direct center for Silent, Prediction for Snap
         if isSilent then
             targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
         else
@@ -667,15 +669,10 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
         aimAngle.y = math.NormalizeAngle(aimAngle.y)
         
         if isSilent then
-            -- TRUE SILENT: We ONLY set the command angles.
-            -- We do NOT call SetEyeAngles.
             cmd:SetViewAngles(aimAngle)
-            
-            -- Some servers/setups force the view to follow cmd. 
-            -- This is a common trick to "fix" that:
+
             return false 
         else
-            -- SNAP AIM:
             local currentAng = cmd:GetViewAngles()
             if GetConVarNumber("ml_aimbot_smooth") == 1 then
                 local smoothAmt = 0.2
@@ -689,6 +686,31 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
             LocalPlayer():SetEyeAngles(aimAngle) 
         end
     end
+end)
+
+local oldPunch = Angle(0, 0, 0)
+
+hook.Add("CreateMove", "ML_RecoilControl", function(cmd)
+    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_rcs") == 0 then return end
+    
+    local ply = LocalPlayer()
+    if not IsValid(ply) or not ply:Alive() then return end
+        
+    local currentPunch = ply:GetViewPunchAngles()
+    local strength = GetConVar("ml_rcs_strength"):GetFloat()
+
+    if currentPunch.p ~= 0 or currentPunch.y ~= 0 then
+        local viewAngles = cmd:GetViewAngles()
+
+        local punchDiff = currentPunch - oldPunch
+
+        viewAngles.p = viewAngles.p - (punchDiff.p * strength)
+        viewAngles.y = viewAngles.y - (punchDiff.y * strength)
+        
+        cmd:SetViewAngles(viewAngles)
+    end
+
+    oldPunch = currentPunch
 end)
 
 gameevent.Listen("entity_killed")
@@ -856,7 +878,8 @@ if IsValid(ml_frame) then
     AddSection("GAMEPLAY", function(p, check)
         check(p, "Bhop", "ml_bhop")
         check(p, "Propkill Aimbot", "ml_aimbot")
-        check(p, "Silent Aim", "ml_silent_aim")
+        check(p, "Aimbot", "ml_silent_aim")
+        check(p, "Recoil Control (HL2)", "ML_RecoilControl")
     end)
 
     AddSection("MISC", function(p, check)
