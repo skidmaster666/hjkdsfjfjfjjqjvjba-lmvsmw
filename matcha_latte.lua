@@ -445,6 +445,7 @@ end)
 local stats = {max_vel = 0, current_vel = 0, distance = 0, last_pos = nil, last_time = 0}
 
 hook.Add("Think", "ML_Stats", function()
+    if ML == nil then return end
     if not (IsValid(LocalPlayer()) and LocalPlayer():Alive()) then return end
     local vel = LocalPlayer():GetVelocity():Length()
     if vel > stats.max_vel then stats.max_vel = vel end
