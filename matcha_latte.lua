@@ -47,6 +47,7 @@ CreateClientConVar("ml_aimbot_smooth", 0, true, false, "Enable smoothing")
 CreateClientConVar("ml_aimbot_fov", 180, true, false, "Aimbot FOV")
 CreateClientConVar("ml_health_ammo", 1, true, false)
 CreateClientConVar("ml_prop_hitsounds", 1, true, false)
+CreateClientConVar("ml_silent_aim", 0, true, false)
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
 surface.CreateFont("ML_Subtitle", {font = "Verdana", size = 14, weight = 700, antialias = true})
@@ -634,14 +635,11 @@ local function GetTarget()
 end
 
 hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
-        if not ML then return end
-    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
+    if not ML or GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
         ML.aimbot_target = nil
         return 
     end
 
-
-if ML == nil then return end
     if not input.IsKeyDown(KEY_X) then
         ML.aimbot_target = nil
         return 
@@ -652,24 +650,34 @@ if ML == nil then return end
     end
 
     if IsValid(ML.aimbot_target) then
-        local predictedPos = PredictPos(ML.aimbot_target)
+        local targetPos
+        if GetConVarNumber("ml_silent_aim") == 1 then
+            targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
+        else
+            targetPos = PredictPos(ML.aimbot_target)
+        end
+
         local myPos = LocalPlayer():EyePos()
-        local aimAngle = (predictedPos - myPos):Angle()
+        local aimAngle = (targetPos - myPos):Angle()
 
         aimAngle.p = math.NormalizeAngle(aimAngle.p)
         aimAngle.y = math.NormalizeAngle(aimAngle.y)
         
-        local currentAng = cmd:GetViewAngles()
-        local diffP = math.NormalizeAngle(aimAngle.p - currentAng.p)
-        local diffY = math.NormalizeAngle(aimAngle.y - currentAng.y)
-        
-        if GetConVarNumber("ml_aimbot_smooth") == 1 then
-            local smoothAmt = 0.2
-            aimAngle.p = math.NormalizeAngle(currentAng.p + (diffP * smoothAmt))
-            aimAngle.y = math.NormalizeAngle(currentAng.y + (diffY * smoothAmt))
+        if GetConVarNumber("ml_silent_aim") == 1 then
+            cmd:SetViewAngles(aimAngle)
+        else
+            local currentAng = cmd:GetViewAngles()
+            if GetConVarNumber("ml_aimbot_smooth") == 1 then
+                local smoothAmt = 0.2
+                local diffP = math.NormalizeAngle(aimAngle.p - currentAng.p)
+                local diffY = math.NormalizeAngle(aimAngle.y - currentAng.y)
+                aimAngle.p = math.NormalizeAngle(currentAng.p + (diffP * smoothAmt))
+                aimAngle.y = math.NormalizeAngle(currentAng.y + (diffY * smoothAmt))
+            end
+            
+            cmd:SetViewAngles(aimAngle)
+            LocalPlayer():SetEyeAngles(aimAngle)
         end
-
-        cmd:SetViewAngles(aimAngle)
     end
 end)
 
@@ -837,7 +845,8 @@ if IsValid(ml_frame) then
 
     AddSection("GAMEPLAY", function(p, check)
         check(p, "Bhop", "ml_bhop")
-        check(p, "Aimbot (Key X)", "ml_aimbot")
+        check(p, "Propkill Aimbot", "ml_aimbot")
+        check(p, "Silent Aim", "ml_silent_aim")
     end)
 
     AddSection("MISC", function(p, check)
