@@ -640,7 +640,9 @@ local function GetTarget()
 end
 
 hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
-    if not ML or GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
+    if ML == nil then return end 
+        
+    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
         ML.aimbot_target = nil
         return 
     end
