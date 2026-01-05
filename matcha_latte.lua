@@ -651,7 +651,10 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
 
     if IsValid(ML.aimbot_target) then
         local targetPos
-        if GetConVarNumber("ml_silent_aim") == 1 then
+        local isSilent = GetConVarNumber("ml_silent_aim") == 1
+        
+        -- Use direct center for Silent, Prediction for Snap
+        if isSilent then
             targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
         else
             targetPos = PredictPos(ML.aimbot_target)
@@ -663,9 +666,16 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
         aimAngle.p = math.NormalizeAngle(aimAngle.p)
         aimAngle.y = math.NormalizeAngle(aimAngle.y)
         
-        if GetConVarNumber("ml_silent_aim") == 1 then
+        if isSilent then
+            -- TRUE SILENT: We ONLY set the command angles.
+            -- We do NOT call SetEyeAngles.
             cmd:SetViewAngles(aimAngle)
+            
+            -- Some servers/setups force the view to follow cmd. 
+            -- This is a common trick to "fix" that:
+            return false 
         else
+            -- SNAP AIM:
             local currentAng = cmd:GetViewAngles()
             if GetConVarNumber("ml_aimbot_smooth") == 1 then
                 local smoothAmt = 0.2
@@ -676,7 +686,7 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
             end
             
             cmd:SetViewAngles(aimAngle)
-            LocalPlayer():SetEyeAngles(aimAngle)
+            LocalPlayer():SetEyeAngles(aimAngle) 
         end
     end
 end)
