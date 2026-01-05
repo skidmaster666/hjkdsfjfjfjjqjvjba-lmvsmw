@@ -633,25 +633,6 @@ local function GetTarget()
     return bestEnt
 end
 
-hook.Add("HUDPaint", "ML_AimbotUI", function()
-if not ML or GetConVarNumber("ml_aimbot") == 0 or not IsValid(ML.aimbot_target) then 
-    return 
-end
-    
-    local target = ML.aimbot_target
-    local pos = target:LocalToWorld(target:OBBCenter()):ToScreen()
-    local pred = PredictPos(target):ToScreen()
-    
-    surface.SetDrawColor(255, 50, 50, 200)
-    surface.DrawOutlinedRect(pos.x-10, pos.y-10, 20, 20)
-    
-    surface.SetDrawColor(0, 255, 255, 150)
-    surface.DrawLine(pos.x, pos.y, pred.x, pred.y)
-    surface.DrawCircle(pred.x, pred.y, 5, 0, 255, 255, 200)
-    
-    draw.SimpleText("TARGET", "ML_Text", pos.x, pos.y - 20, Color(255,50,50), 1, 1)
-end)
-
 hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
         if not ML then return end
     if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
