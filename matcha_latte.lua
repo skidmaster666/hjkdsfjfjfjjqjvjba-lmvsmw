@@ -51,6 +51,7 @@ CreateClientConVar("ml_silent_aim", 0, true, false)
 CreateClientConVar("ml_rcs", 0, true, false)
 CreateClientConVar("ml_rcs_strength", 1, true, false)
 
+
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
 surface.CreateFont("ML_Subtitle", {font = "Verdana", size = 14, weight = 700, antialias = true})
 surface.CreateFont("ML_Text", {font = "Verdana", size = 12, weight = 500, antialias = true})
@@ -845,7 +846,7 @@ if IsValid(ml_frame) then
         check(p, "Tracers", "ml_tracers")
         check(p, "Third Person", "ml_3rdperson")
         check(p, "Enable FOV Changer", "ml_fov_enable")
-        check(p, "HUD", "ml_healthammo")
+        check(p, "HUD", "ml_health_ammo")
         
         local fov_slider = p:Add("DNumSlider")
         fov_slider:SetMin(50)
@@ -879,7 +880,7 @@ if IsValid(ml_frame) then
         check(p, "Bhop", "ml_bhop")
         check(p, "Propkill Aimbot", "ml_aimbot")
         check(p, "Aimbot", "ml_silent_aim")
-        check(p, "Recoil Control (HL2)", "ML_RecoilControl")
+        check(p, "Recoil Control (HL2)", "ml_rcs")
     end)
 
     AddSection("MISC", function(p, check)
