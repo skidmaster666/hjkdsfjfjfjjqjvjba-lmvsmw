@@ -48,12 +48,8 @@ CreateClientConVar("ml_aimbot_fov", 180, true, false, "Aimbot FOV")
 CreateClientConVar("ml_health_ammo", 1, true, false)
 CreateClientConVar("ml_prop_hitsounds", 1, true, false)
 CreateClientConVar("ml_silent_aim", 0, true, false)
-CreateClientConVar("ml_rcs", 0, true, false)
-CreateClientConVar("ml_rcs_strength", 1, true, false)
 CreateClientConVar("ml_fullbright", 0, true, false)
 CreateClientConVar("ml_custom_crosshair", 0, true, false)
-CreateClientConVar("ml_aspect_ratio", 0, true, false)
-CreateClientConVar("ml_aspect_ratio_val", 1.77, true, false)
 
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
@@ -154,7 +150,7 @@ local function UnhookMatcha()
         {"HUDPaint", "ML_VelocityHUD"},
         {"HUDPaint", "ML_Watermark"},
         {"Think", "ML_Bhop"},
-        {"CalcView", "ML_CalcView"},
+        {"CalcView", "ML_MainView"},
         {"ShouldDrawLocalPlayer", "ML_ShouldDrawThirdPerson"},
         {"entity_killed", "ML_PropKills"},
         {"Think", "ML_MenuKeyBind"},
@@ -162,11 +158,8 @@ local function UnhookMatcha()
         {"HUDPaint", "ML_HealthAmmo"},
         {"HUDShouldDraw", "ML_HideDefaultHUD"},
         {"entity_killed", "ML_PropHitsound"},
-        {"CreateMove", "ML_RecoilControl"},
-        {"Think", "ML_Fullbright"},
         {"HUDPaint", "ML_CustomCrosshair"},
         {"HUDShouldDraw", "ML_HideCrosshair"},
-        {"CalcView", "ML_AspectRatio"},
     }
 
     for _, v in pairs(hooks) do
@@ -356,17 +349,6 @@ hook.Add("RenderScreenspaceEffects", "ML_Trajectory", function()
     end
 end)
 
-hook.Add("CalcView", "ML_AspectRatio", function(ply, pos, ang, fov)
-    if GetConVarNumber("ml_aspect_ratio") == 1 and GetConVarNumber("ml_enabled") == 1 then
-        return {
-            origin = pos,
-            angles = ang,
-            fov = fov,
-            aspectratio = GetConVar("ml_aspect_ratio_val"):GetFloat()
-        }
-    end
-end)
-
 hook.Add("HUDShouldDraw", "ML_HideCrosshair", function(name)
     if GetConVarNumber("ml_custom_crosshair") == 1 and name == "CHudCrosshair" then
         return false
@@ -388,14 +370,6 @@ hook.Add("HUDPaint", "ML_CustomCrosshair", function()
     surface.SetDrawColor(col.r, col.g, col.b, 255)
     for i = 1, 3 do
         surface.DrawCircle(x, y, 4 - i, 255, 255, 255, 255)
-    end
-end)
-
-hook.Add("Think", "ML_Fullbright", function()
-    if GetConVarNumber("ml_fullbright") == 1 and GetConVarNumber("ml_enabled") == 1 then
-        render.SetLightingMode(2)
-    else
-        render.SetLightingMode(0)
     end
 end)
 
@@ -614,33 +588,30 @@ hook.Add("ShouldDrawLocalPlayer", "ML_ShouldDrawThirdPerson", function(ply)
     end
 end)
 
-hook.Add("CalcView", "ML_CalcView", function(ply, pos, angles, fov)
+
+hook.Add("CalcView", "ML_MainView", function(ply, pos, ang, fov)
     if not ML or GetConVarNumber("ml_enabled") == 0 then return end
     
+    local view = {}
+    view.origin = pos
+    view.angles = ang
+    view.fov = fov
+
+    if GetConVarNumber("ml_fov_enable") == 1 then
+        view.fov = GetConVarNumber("ml_fov_value")
+    end
+
     if GetConVarNumber("ml_3rdperson") == 1 and ply:Alive() then
-        local view = {}
         local dist = 100
         local tr = util.TraceLine({
             start = pos,
-            endpos = pos - (angles:Forward() * dist) + (angles:Up() * 10),
+            endpos = pos - (ang:Forward() * dist) + (ang:Up() * 10),
             filter = ply
         })
-        
         view.origin = tr.HitPos + tr.HitNormal * 5
-        view.angles = angles
         view.drawviewer = true
-        if GetConVarNumber("ml_fov_enable") == 1 then
-            view.fov = GetConVarNumber("ml_fov_value")
-        end
-        
-        return view
     end
-end)
 
-hook.Add("CalcView", "ML_CalcView", function(ply, pos, ang)
-    local view = {}
-    if GetConVarNumber("ml_fov_enable") == 1 then view.fov = GetConVarNumber("ml_fov_value") end
-    if GetConVarNumber("ml_3rdperson") == 1 then view.origin = pos - ang:Forward() * 100 end
     return view
 end)
 
@@ -744,29 +715,6 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
 end)
 
 local oldPunch = Angle(0, 0, 0)
-
-hook.Add("CreateMove", "ML_RecoilControl", function(cmd)
-    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_rcs") == 0 then return end
-    
-    local ply = LocalPlayer()
-    if not IsValid(ply) or not ply:Alive() then return end
-        
-    local currentPunch = ply:GetViewPunchAngles()
-    local strength = GetConVar("ml_rcs_strength"):GetFloat()
-
-    if currentPunch.p ~= 0 or currentPunch.y ~= 0 then
-        local viewAngles = cmd:GetViewAngles()
-
-        local punchDiff = currentPunch - oldPunch
-
-        viewAngles.p = viewAngles.p - (punchDiff.p * strength)
-        viewAngles.y = viewAngles.y - (punchDiff.y * strength)
-        
-        cmd:SetViewAngles(viewAngles)
-    end
-
-    oldPunch = currentPunch
-end)
 
 gameevent.Listen("entity_killed")
 hook.Add("entity_killed", "ML_PropKills", function(data)
@@ -900,14 +848,13 @@ if IsValid(ml_frame) then
         check(p, "Tracers", "ml_tracers")
         check(p, "Third Person", "ml_3rdperson")
         check(p, "Enable FOV Changer", "ml_fov_enable")
-        check(p, "HUD", "ml_health_ammo")
         
         local fov_slider = p:Add("DNumSlider")
         fov_slider:SetMin(50)
         fov_slider:SetMax(140)
         fov_slider:SetDecimals(0)
         fov_slider:SetConVar("ml_fov_value")
-        fov_slider:SetText("Field of View Amount")
+        fov_slider:SetText("Value")
         fov_slider:DockMargin(5, 0, 0, 5)
         fov_slider.Label:SetFont("ML_Text")
         fov_slider.Label:SetTextColor(color_text_off)
@@ -934,24 +881,11 @@ if IsValid(ml_frame) then
         check(p, "Bhop", "ml_bhop")
         check(p, "Propkill Aimbot", "ml_aimbot")
         check(p, "Aimbot", "ml_silent_aim")
-        check(p, "Recoil Control (HL2)", "ml_rcs")
     end)
 
     AddSection("MISC", function(p, check)
         check(p, "Hitsounds", "ml_prop_hitsounds")
-        check(p, "Fullbright", "ml_fullbright")
         check(p, "Crosshair", "ml_custom_crosshair")
-        check(p, "Aspect Ratio", "ml_aspect_ratio")
-
-        local aspect_slider = p:Add("DNumSlider")
-        aspect_slider:SetMin(0.1)
-        aspect_slider:SetMax(3.0)
-        aspect_slider:SetDecimals(2)
-        aspect_slider:SetConVar("ml_aspect_ratio_val")
-        aspect_slider:SetText("Aspect Ratio Value")
-        aspect_slider:DockMargin(5, 0, 0, 5)
-        aspect_slider.Label:SetFont("ML_Text")
-        aspect_slider.Label:SetTextColor(color_text_off)
 
         local unhook = p:Add("DButton")
         unhook:SetText("UNHOOK")
