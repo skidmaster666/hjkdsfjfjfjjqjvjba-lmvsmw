@@ -7,7 +7,7 @@ local ML = {
     aimbot_target = nil,
     KillMessage = "1",
 }
---test
+
 local snowflakes = {}
 
 local lethal_active = false
@@ -50,6 +50,10 @@ CreateClientConVar("ml_prop_hitsounds", 1, true, false)
 CreateClientConVar("ml_silent_aim", 0, true, false)
 CreateClientConVar("ml_rcs", 0, true, false)
 CreateClientConVar("ml_rcs_strength", 1, true, false)
+CreateClientConVar("ml_fullbright", 0, true, false)
+CreateClientConVar("ml_custom_crosshair", 0, true, false)
+CreateClientConVar("ml_aspect_ratio", 0, true, false)
+CreateClientConVar("ml_aspect_ratio_val", 1.77, true, false)
 
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
@@ -159,6 +163,10 @@ local function UnhookMatcha()
         {"HUDShouldDraw", "ML_HideDefaultHUD"},
         {"entity_killed", "ML_PropHitsound"},
         {"CreateMove", "ML_RecoilControl"},
+        {"Think", "ML_Fullbright"},
+        {"HUDPaint", "ML_CustomCrosshair"},
+        {"HUDShouldDraw", "ML_HideCrosshair"},
+        {"CalcView", "ML_AspectRatio"},
     }
 
     for _, v in pairs(hooks) do
@@ -345,6 +353,49 @@ hook.Add("RenderScreenspaceEffects", "ML_Trajectory", function()
             cam.IgnoreZ(false)
             cam.End3D()
         end
+    end
+end)
+
+hook.Add("CalcView", "ML_AspectRatio", function(ply, pos, ang, fov)
+    if GetConVarNumber("ml_aspect_ratio") == 1 and GetConVarNumber("ml_enabled") == 1 then
+        return {
+            origin = pos,
+            angles = ang,
+            fov = fov,
+            aspectratio = GetConVar("ml_aspect_ratio_val"):GetFloat()
+        }
+    end
+end)
+
+hook.Add("HUDShouldDraw", "ML_HideCrosshair", function(name)
+    if GetConVarNumber("ml_custom_crosshair") == 1 and name == "CHudCrosshair" then
+        return false
+    end
+end)
+
+hook.Add("HUDPaint", "ML_CustomCrosshair", function()
+    if GetConVarNumber("ml_custom_crosshair") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    
+    local x, y = ScrW() / 2, ScrH() / 2
+    local col = PulseColor()
+
+    surface.SetDrawColor(col.r, col.g, col.b, 255)
+    draw.NoTexture()
+
+    surface.SetDrawColor(0, 0, 0, 200)
+    surface.DrawCircle(x, y, 5, 0, 0, 0, 255)
+
+    surface.SetDrawColor(col.r, col.g, col.b, 255)
+    for i = 1, 3 do
+        surface.DrawCircle(x, y, 4 - i, 255, 255, 255, 255)
+    end
+end)
+
+hook.Add("Think", "ML_Fullbright", function()
+    if GetConVarNumber("ml_fullbright") == 1 and GetConVarNumber("ml_enabled") == 1 then
+        render.SetLightingMode(2)
+    else
+        render.SetLightingMode(0)
     end
 end)
 
@@ -888,6 +939,19 @@ if IsValid(ml_frame) then
 
     AddSection("MISC", function(p, check)
         check(p, "Hitsounds", "ml_prop_hitsounds")
+        check(p, "Fullbright", "ml_fullbright")
+        check(p, "Crosshair", "ml_custom_crosshair")
+        check(p, "Aspect Ratio", "ml_aspect_ratio")
+
+        local aspect_slider = p:Add("DNumSlider")
+        aspect_slider:SetMin(0.1)
+        aspect_slider:SetMax(3.0)
+        aspect_slider:SetDecimals(2)
+        aspect_slider:SetConVar("ml_aspect_ratio_val")
+        aspect_slider:SetText("Aspect Ratio Value")
+        aspect_slider:DockMargin(5, 0, 0, 5)
+        aspect_slider.Label:SetFont("ML_Text")
+        aspect_slider.Label:SetTextColor(color_text_off)
 
         local unhook = p:Add("DButton")
         unhook:SetText("UNHOOK")
