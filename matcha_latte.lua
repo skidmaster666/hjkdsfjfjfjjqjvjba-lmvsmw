@@ -16,7 +16,7 @@ local hitsounds_list = {
     {name = "Skeet", url = "https://files.catbox.moe/575j56.mp3", file = "hitsound_skeet.dat"},
     {name = "Bell", url = "https://files.catbox.moe/8x838s.mp3", file = "hitsound_bell.dat"},
     {name = "Bubble", url = "https://files.catbox.moe/example.mp3", file = "hitsound_bubble.dat"},
-    {name = "osu!", url = "https://files.catbox.moe/example2.mp3", file = "hitsound_osu.dat"},
+    {name = "Rust", url = "https://files.catbox.moe/example2.mp3", file = "hitsound_rust.dat"},
 }
 
 local watermark_fps = 0
