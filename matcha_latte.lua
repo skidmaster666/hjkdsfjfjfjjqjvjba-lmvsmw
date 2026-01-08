@@ -32,7 +32,7 @@ CreateMaterial("ML_GLOW", "UnlitGeneric", {
     ["$basetexture"] = "models/debug/debugwhite", 
     ["$nocull"] = 1, 
     ["$model"] = 1,
-    ["$ignorez"] = 1 -- Added to make it shine through walls better
+    ["$ignorez"] = 1
 })
 local chams_materials = {
     {name = "Flat", mat = "!ML_GLOW"},
