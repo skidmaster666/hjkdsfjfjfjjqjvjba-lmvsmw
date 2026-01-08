@@ -1095,8 +1095,8 @@ local function OpenMenu()
     lbl2:SetContentAlignment(5)
 
     Empty(pnl_game, 10)
-    CreateCheckbox(pnl_game, "Aimbot (Master)", "ml_silent_aim")
-    CreateCheckbox(pnl_game, "Propkill Mode (Prediction)", "ml_aimbot")
+    CreateCheckbox(pnl_game, "Aimbot", "ml_silent_aim")
+    CreateCheckbox(pnl_game, "Propkill Mode", "ml_aimbot")
     Empty(pnl_game, 10) 
     CreateCheckbox(pnl_game, "Bhop", "ml_bhop")
 
