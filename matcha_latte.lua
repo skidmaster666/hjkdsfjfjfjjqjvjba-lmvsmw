@@ -12,8 +12,12 @@ local snowflakes = {}
 
 local lethal_active = false
 
-local soundURL = "https://files.catbox.moe/575j56.mp3"
-local localFileName = "hitsound_skeet.dat"
+local hitsounds_list = {
+    {name = "Skeet", url = "https://files.catbox.moe/575j56.mp3", file = "hitsound_skeet.dat"},
+    {name = "Bell", url = "https://files.catbox.moe/8x838s.mp3", file = "hitsound_bell.dat"},
+    {name = "Bubble", url = "https://files.catbox.moe/example.mp3", file = "hitsound_bubble.dat"},
+    {name = "osu!", url = "https://files.catbox.moe/example2.mp3", file = "hitsound_osu.dat"},
+}
 
 local watermark_fps = 0
 local watermark_last_update = CurTime()
@@ -24,13 +28,27 @@ RunConsoleCommand("cl_cmdrate", "0")
 RunConsoleCommand("cl_interp", "0")
 RunConsoleCommand("rate", "51200")
 
-CreateMaterial("ML_GLOW", "UnlitGeneric", {["$basetexture"] = "models/debug/debugwhite", ["$nocull"] = 1, ["$model"] = 1})
+CreateMaterial("ML_GLOW", "UnlitGeneric", {
+    ["$basetexture"] = "models/debug/debugwhite", 
+    ["$nocull"] = 1, 
+    ["$model"] = 1,
+    ["$ignorez"] = 1 -- Added to make it shine through walls better
+})
+local chams_materials = {
+    {name = "Flat", mat = "!ML_GLOW"},
+    {name = "Wireframe", mat = "models/wireframe"},
+    {name = "Plastic", mat = "models/debug/debugwhite"},
+}
 
 CreateClientConVar("ml_enabled", 1, true, false)
 CreateClientConVar("ml_esp", 1, true, false)
 CreateClientConVar("ml_chams", 1, true, false)
 CreateClientConVar("ml_xray", 1, true, false)
+CreateClientConVar("ml_esp_box", 1, true, false)
 CreateClientConVar("ml_tracers", 1, true, false)
+CreateClientConVar("ml_esp_healthbar", 1, true, false)
+CreateClientConVar("ml_chams_mat", 1, true, false)
+CreateClientConVar("ml_hitsound_select", 1, true, false)
 CreateClientConVar("ml_trajectory", 1, true, false)
 CreateClientConVar("ml_headbeams", 1, true, false)
 CreateClientConVar("ml_physline", 1, true, false)
@@ -53,6 +71,7 @@ CreateClientConVar("ml_custom_crosshair", 0, true, false)
 
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
+surface.CreateFont("ML_Title2", {font = "Verdana", size = 14, weight = 900, antialias = true})
 surface.CreateFont("ML_Subtitle", {font = "Verdana", size = 14, weight = 700, antialias = true})
 surface.CreateFont("ML_Text", {font = "Verdana", size = 12, weight = 500, antialias = true})
 
@@ -63,13 +82,17 @@ end
 
 
 local function PlayEnhanced2DSound()
-    if not file.Exists(localFileName, "DATA") then 
+    local selection = math.Clamp(GetConVarNumber("ml_hitsound_select"), 1, #hitsounds_list)
+    local sndData = hitsounds_list[selection]
+    local fileName = sndData.file
+
+    if not file.Exists("sound/data/"..fileName, "GAME") and not file.Exists(fileName, "DATA") then 
         surface.PlaySound("physics/wood_box_impact_bullet4.wav")
         return 
     end
 
     for i = 1, 3 do
-        sound.PlayFile("data/" .. localFileName, "nopitch mono", function(station)
+        sound.PlayFile("data/" .. fileName, "nopitch mono", function(station)
             if IsValid(station) then
                 station:SetVolume(1.0)
                 station:Play()
@@ -160,6 +183,7 @@ local function UnhookMatcha()
         {"entity_killed", "ML_PropHitsound"},
         {"HUDPaint", "ML_CustomCrosshair"},
         {"HUDShouldDraw", "ML_HideCrosshair"},
+        {"PostDrawTranslucentRenderables", "ML_3DBox"}
     }
 
     for _, v in pairs(hooks) do
@@ -193,12 +217,64 @@ end
 
 hook.Add("HUDPaint", "ML_ESP", function()
     if GetConVarNumber("ml_esp") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    
+    local pulseCol = PulseColor()
+    
     for _, ply in pairs(player.GetAll()) do
         if IsValidPlayer(ply) then
-            local pos = ply:EyePos():ToScreen()
-            draw.SimpleTextOutlined(ply:Nick(), "ML_Text", pos.x, pos.y - 20, PulseColor(), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0, 0, 0, 200))
+            local min, max = ply:GetCollisionBounds()
+            local pos = ply:GetPos()
+            local top = (pos + Vector(0, 0, max.z)):ToScreen()
+            local bottom = (pos + Vector(0, 0, min.z)):ToScreen()
+
+            draw.SimpleTextOutlined(ply:Nick(), "ML_Text", top.x, top.y - 20, pulseCol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0, 0, 0, 200))
+
+            if GetConVarNumber("ml_esp_healthbar") == 1 then
+                local h = bottom.y - top.y
+                local w = h * 0.5
+
+                local barX = top.x + (w * 0.6) 
+                local barY = top.y
+                local barW = 2
+                local barH = h
+                
+                local hp = math.Clamp(ply:Health(), 0, 100)
+                local maxHp = ply:GetMaxHealth()
+                local hpPercent = hp / maxHp
+                local fillH = barH * hpPercent
+
+                surface.SetDrawColor(0, 0, 0, 200)
+                surface.DrawRect(barX, barY, barW, barH)
+
+                surface.SetDrawColor(0, 0, 0, 255)
+                surface.DrawOutlinedRect(barX - 1, barY - 1, barW + 2, barH + 2)
+
+                local col = Color(255 - (hpPercent * 255), hpPercent * 255, 0)
+                surface.SetDrawColor(col.r, col.g, col.b, 255)
+
+                surface.DrawRect(barX, barY + (barH - fillH), barW, fillH)
+
+                if hp < 100 then
+                    draw.SimpleTextOutlined(tostring(hp), "ML_Text", barX + 6, barY + (barH - fillH) - 4, Color(255, 255, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1, Color(0,0,0))
+                end
+            end
         end
     end
+end)
+hook.Add("PostDrawTranslucentRenderables", "ML_3DBox", function()
+    if GetConVarNumber("ml_esp") == 0 or GetConVarNumber("ml_esp_box") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    
+    cam.Start3D()
+    local col = PulseColor()
+    
+    for _, ply in pairs(player.GetAll()) do
+        if IsValidPlayer(ply) then
+            local min, max = ply:GetCollisionBounds()
+            render.DrawWireframeBox(ply:GetPos(), Angle(0,0,0), min, max, col, true)
+        end
+    end
+    
+    cam.End3D()
 end)
 
 hook.Add("HUDPaint", "ML_HealthAmmo", function()
@@ -259,29 +335,38 @@ hook.Add("HUDPaint", "ML_HealthAmmo", function()
 end)
 
 hook.Add("PreDrawEffects", "ML_CHAMS", function()
-    if GetConVarNumber("ml_chams") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    if GetConVarNumber("ml_chams") == 0 or GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_esp") == 0 then return end
     
+    local matIndex = GetConVarNumber("ml_chams_mat")
+    local selectedMatData = chams_materials[matIndex] or chams_materials[1]
+    local useMaterial = selectedMatData.mat
+
     for _, ply in pairs(player.GetAll()) do
         if ply == LocalPlayer() then continue end
         
         if IsValidPlayer(ply) then
-            ply:SetColor(Color(0, 0, 0, 0))
             cam.IgnoreZ(true)
-            ply:SetRenderMode(RENDERMODE_TRANSALPHA)
+
+            local material = Material(useMaterial)
+            render.MaterialOverride(material)
             render.SuppressEngineLighting(true)
-            render.MaterialOverride(Material("!ML_GLOW"))
             
             local col = PulseColor()
             render.SetColorModulation(col.r / 255, col.g / 255, col.b / 255)
-            render.SetBlend(0.8)
+
+            if selectedMatData.name == "Wireframe" then
+                 render.SetBlend(1)
+            else
+                 render.SetBlend(0.8)
+            end
             
             ply:DrawModel()
             
             render.MaterialOverride(nil)
             render.SuppressEngineLighting(false)
             cam.IgnoreZ(false)
-        else
-            ply:SetColor(Color(255, 255, 255, 255))
+
+                 ply:SetColor(Color(255,255,255,255))
         end
     end
 end)
@@ -664,7 +749,7 @@ end
 hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
     if ML == nil then return end 
 
-    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_aimbot") == 0 then 
+    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_silent_aim") == 0 then 
         ML.aimbot_target = nil
         return 
     end
@@ -680,12 +765,12 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
 
     if IsValid(ML.aimbot_target) then
         local targetPos
-        local isSilent = GetConVarNumber("ml_silent_aim") == 1
+        local use_prediction = GetConVarNumber("ml_aimbot") == 1
         
-        if isSilent then
-            targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
-        else
+        if use_prediction then
             targetPos = PredictPos(ML.aimbot_target)
+        else
+            targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
         end
 
         local myPos = LocalPlayer():EyePos()
@@ -693,24 +778,8 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
 
         aimAngle.p = math.NormalizeAngle(aimAngle.p)
         aimAngle.y = math.NormalizeAngle(aimAngle.y)
-        
-        if isSilent then
-            cmd:SetViewAngles(aimAngle)
 
-            return false 
-        else
-            local currentAng = cmd:GetViewAngles()
-            if GetConVarNumber("ml_aimbot_smooth") == 1 then
-                local smoothAmt = 0.2
-                local diffP = math.NormalizeAngle(aimAngle.p - currentAng.p)
-                local diffY = math.NormalizeAngle(aimAngle.y - currentAng.y)
-                aimAngle.p = math.NormalizeAngle(currentAng.p + (diffP * smoothAmt))
-                aimAngle.y = math.NormalizeAngle(currentAng.y + (diffY * smoothAmt))
-            end
-            
-            cmd:SetViewAngles(aimAngle)
-            LocalPlayer():SetEyeAngles(aimAngle) 
-        end
+        cmd:SetViewAngles(aimAngle)
     end
 end)
 
@@ -746,14 +815,26 @@ hook.Add("HUDPaint", "ML_SnowflakesBackground", function()
     DrawSnowflakes()
 end)
 
+local function LerpColor(frac, from, to)
+    return Color(
+        from.r + (to.r - from.r) * frac,
+        from.g + (to.g - from.g) * frac,
+        from.b + (to.b - from.b) * frac,
+        from.a + (to.a - from.a) * frac
+    )
+end
+
 local menuX, menuY = nil, nil
+local active_tab = "VISUALS"
+
+local custom_icon = Material("matcha/icon.png") 
+
+
 local function OpenMenu()
-if IsValid(ml_frame) then
+    if IsValid(ml_frame) then
         if ml_frame.isClosing then return end
         ml_frame.isClosing = true 
-
         menuX, menuY = ml_frame:GetPos()
-        
         ml_frame:SetMouseInputEnabled(false)
         ml_frame:SetKeyboardInputEnabled(false)
         ml_frame:AlphaTo(0, 0.1, 0, function()
@@ -768,8 +849,7 @@ if IsValid(ml_frame) then
     local frame = vgui.Create("DFrame")
     ml_frame = frame
     frame:SetTitle("")
-    frame:SetSize(400, 650)
-
+    frame:SetSize(480, 600)
     if menuX and menuY then
         frame:SetPos(menuX, menuY)
     else
@@ -781,136 +861,329 @@ if IsValid(ml_frame) then
     frame:SetAlpha(0)
     frame:AlphaTo(255, 0.1)
 
-    local color_bg = Color(14, 14, 14, 255)
-    local color_outline = Color(16, 16, 16, 255)
-    local color_section = Color(16,16,16, 255)
-    local color_accent = Color(255, 196, 241, 255)
-    local color_header_bg = Color(28, 28, 28, 255)
-    local color_text_off = Color(160, 160, 160, 255)
+    local col_bg = Color(14, 14, 14, 255)
+    local col_accent = Color(255, 196, 241, 255)
+    local col_text_off = Color(100, 100, 100, 255)
+
     frame.Paint = function(self, w, h)
         Derma_DrawBackgroundBlur(self, self.m_fCreateTime)
+        draw.RoundedBox(8, 0, 0, w, h, Color(16, 16, 16))
+        draw.RoundedBox(8, 1, 1, w - 2, h - 2, Color(14, 14, 14))
+        
+        surface.SetDrawColor(255, 255, 255, 255)
+        surface.SetMaterial(custom_icon)
+        surface.DrawTexturedRect(10, 6, 16, 16) 
 
-        draw.RoundedBox(8, 0, 0, w, h, color_outline)
-        draw.RoundedBox(8, 1, 1, w - 2, h - 2, color_bg) 
+        draw.SimpleText(" matcha latte", "ML_Title2", 28, 5, Color(255, 196, 241), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
-        draw.RoundedBoxEx(8, 1, 1, w - 2, 25, color_header_bg, true, true, false, false)
-        draw.SimpleText("matcha latte", "ML_Subtitle", 10, 4, color_accent, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        surface.SetDrawColor(25, 25, 25)
+        surface.DrawRect(20, 48, w - 40, 1) 
     end
+
+    local content_area = vgui.Create("DPanel", frame)
+    content_area:Dock(FILL)
+    content_area:DockMargin(0, 40, 5, 5)
+    content_area.Paint = function() end
+
+    local panels = {}
+
+    local function Empty(parent, height)
+        local spacer = parent:Add("DPanel")
+        spacer:Dock(TOP)
+        spacer:SetTall(height)
+        spacer.Paint = function() end
+    end
+
+    local function CreateCheckbox(parent, text, convar)
+        local cb = parent:Add("DCheckBoxLabel")
+        cb:SetText(text)
+        cb:SetConVar(convar)
+        cb:SetFont("ML_Text")
+        cb:Dock(TOP)
+        cb:DockMargin(10, 0, 0, 5)
+
+        cb.Button.Paint = function(panel, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 35))
+            if cb:GetChecked() then
+                draw.RoundedBox(4, 2, 2, w - 4, h - 4, Color(255, 196, 241))
+            end
+        end
+
+        cb.Think = function(self)
+            self:SetTextColor(self:GetChecked() and col_accent or col_text_off)
+        end
+    end
+
+    local function StyleDropdown(parent, label_text)
+        if label_text then
+            local lbl = parent:Add("DLabel")
+            lbl:SetText(label_text)
+            lbl:SetFont("ML_Text")
+            lbl:SetTextColor(Color(100, 100, 100))
+            lbl:Dock(TOP)
+            lbl:SetContentAlignment(5)
+            lbl:DockMargin(0, 5, 0, 2)
+        end
     
-    local scroll = vgui.Create("DScrollPanel", frame)
-    scroll:Dock(FILL)
-    scroll:DockMargin(5, 30, 5, 5)
-
-    local function AddSection(name, items_callback)
-        local container = vgui.Create("DPanel", scroll)
-        container:Dock(TOP)
-        container:DockMargin(5, 0, 5, 10)
+        local combo = parent:Add("DComboBox")
+        combo:Dock(TOP)
+        combo:DockMargin(5, 0, 5, 10) 
+        combo:SetFont("ML_Text")
+        combo:SetTextColor(Color(255, 196, 241))
         
-        local content = vgui.Create("DListLayout", container)
-        content:Dock(TOP)
-        content:DockMargin(10, 30, 10, 10)
-
-        container.Paint = function(self, w, h)
-            draw.RoundedBox(8, 0, 0, w, h, color_section)
-            draw.SimpleText(name, "ML_Subtitle", 10, 7, color_accent, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        combo.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 35))
+            local text = self:GetSelected() or "Select..."
+            draw.SimpleText(text, "ML_Text", 8, h/2, Color(255, 196, 241), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText("▼", "ML_Text", w - 10, h/2, Color(255, 196, 241), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            return true 
         end
-
-        local function CustomCheck(parent, text, convar)
-            local cb = parent:Add("DCheckBoxLabel")
-            cb:SetText(text)
-            cb:SetConVar(convar)
-            cb:SetFont("ML_Text")
-            cb:DockMargin(0, 0, 0, 7)
-            
-            cb.Button.Paint = function(panel, w, h)
-                draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 35))
-                if cb:GetChecked() then
-                    draw.RoundedBox(4, 2, 2, w - 4, h - 4, color_accent)
-                end
-            end
-
-            cb.Think = function(self)
-                self:SetTextColor(self:GetChecked() and color_accent or color_text_off)
-            end
-            return cb
-        end
-        
-
-        items_callback(content, CustomCheck)
-        content:InvalidateLayout(true)
-        container:SetTall(content:GetTall() + 40)
+        return combo
     end
 
-    AddSection("VISUALS", function(p, check)
-        check(p, "Player ESP", "ml_esp")
-        check(p, "Player Glow (CHAMS)", "ml_chams")
-        check(p, "Prop X-Ray", "ml_xray")
-        check(p, "Tracers", "ml_tracers")
-        check(p, "Third Person", "ml_3rdperson")
-        check(p, "Enable FOV Changer", "ml_fov_enable")
-        
-        local fov_slider = p:Add("DNumSlider")
-        fov_slider:SetMin(50)
-        fov_slider:SetMax(140)
-        fov_slider:SetDecimals(0)
-        fov_slider:SetConVar("ml_fov_value")
-        fov_slider:SetText("Value")
-        fov_slider:DockMargin(5, 0, 0, 5)
-        fov_slider.Label:SetFont("ML_Text")
-        fov_slider.Label:SetTextColor(color_text_off)
+    local pnl_vis_container = vgui.Create("DPanel", content_area)
+    pnl_vis_container:Dock(FILL)
+    pnl_vis_container:SetVisible(false)
+    pnl_vis_container.Paint = function() end
+    panels["VISUALS"] = pnl_vis_container
 
-        fov_slider.Slider.Paint = function(panel, w, h)
-            surface.SetDrawColor(35, 35, 35)
-            surface.DrawRect(0, h / 2 - 1, w, 2)
+    local previewPnl = pnl_vis_container:Add("DModelPanel")
+    previewPnl:Dock(RIGHT)
+    previewPnl:SetWide(180)
+    previewPnl:DockMargin(20, 10, 20, 150)
+
+    previewPnl:SetModel("models/player/kleiner.mdl")
+    previewPnl:SetFOV(40)
+    previewPnl:SetCamPos(Vector(80, 0, 40))
+    previewPnl:SetLookAt(Vector(40, 0, 38))
+
+    local oldPaint = previewPnl.Paint
+    previewPnl.Paint = function(self, w, h)
+        draw.RoundedBox(4, 0, 0, w, h, Color(20, 20, 20))
+        draw.SimpleText("PREVIEW", "ML_Title2", w/2, 10, Color(50, 50, 50), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+        oldPaint(self, w, h)
+    end
+
+    previewPnl.DrawModel = function(self)
+        local ent = self.Entity
+        if not IsValid(ent) then return end
+
+        local chams_on = GetConVarNumber("ml_chams") == 1
+        
+        if chams_on then
+            local matIndex = GetConVarNumber("ml_chams_mat")
+            local selectedMatData = chams_materials[matIndex] or chams_materials[1]
+            local useMaterial = selectedMatData.mat
+
+            render.MaterialOverride(Material(useMaterial))
+            render.SuppressEngineLighting(true)
+            
+            local col = Color(255, 196, 241)
+            render.SetColorModulation(col.r / 255, col.g / 255, col.b / 255)
+
+            if selectedMatData.name == "Wireframe" then
+                 render.SetBlend(1)
+                 ent:SetColor(Color(0,0,0,0))
+                 ent:SetRenderMode(RENDERMODE_TRANSALPHA)
+            else
+                 render.SetBlend(0.8)
+            end
+            
+            ent:DrawModel()
+            
+            render.MaterialOverride(nil)
+            render.SuppressEngineLighting(false)
+            ent:SetColor(Color(255,255,255,255))
+        else
+            ent:DrawModel()
+        end
+    end
+
+    previewPnl.PaintOver = function(self, w, h)
+        local ent = self.Entity
+        if not IsValid(ent) then return end
+
+        local col = Color(255, 196, 241)
+
+        local max_box_width = w * 0.6 
+        local box_w = max_box_width
+        local box_h = box_w * 2.2
+
+        local box_x = (w - box_w) / 2
+        local box_y = (h - box_h) / 2
+
+        if GetConVarNumber("ml_esp_box") == 1 then
+           surface.SetDrawColor(col)
+           surface.DrawOutlinedRect(box_x, box_y, box_w, box_h)
         end
 
-        fov_slider.Slider.Knob.Paint = function(panel, w, h)
-            draw.NoTexture()
-            surface.SetDrawColor(color_accent)
-            for i = 0, 10 do
-                local radius = (w / 2) - 3
-                for j = 0, 360, 20 do
-                    local rad = math.rad(j)
-                    surface.DrawLine(w / 2, h / 2, w / 2 + math.cos(rad) * radius, h / 2 + math.sin(rad) * radius)
-                end
+        if GetConVarNumber("ml_esp") == 1 then
+            draw.SimpleText("Player", "ML_Text", w/2, box_y - 15, col, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+
+        if GetConVarNumber("ml_esp_healthbar") == 1 then
+            local barX = box_x + box_w + 4
+            local barY = box_y
+            local barH = box_h
+
+            if barX + 4 < w then 
+                surface.SetDrawColor(0, 0, 0, 255)
+                surface.DrawOutlinedRect(barX, barY, 4, barH)
+                
+                surface.SetDrawColor(0, 255, 0, 255)
+                surface.DrawRect(barX + 1, barY, 2, barH) 
             end
         end
-    end)
+    end
 
-    AddSection("GAMEPLAY", function(p, check)
-        check(p, "Bhop", "ml_bhop")
-        check(p, "Propkill Aimbot", "ml_aimbot")
-        check(p, "Aimbot", "ml_silent_aim")
-    end)
+    local pnl_vis = vgui.Create("DScrollPanel", pnl_vis_container)
+    pnl_vis:Dock(FILL)
+    pnl_vis:DockMargin(5, 0, 10, 0)
 
-    AddSection("MISC", function(p, check)
-        check(p, "Hitsounds", "ml_prop_hitsounds")
-        check(p, "Crosshair", "ml_custom_crosshair")
+    Empty(pnl_vis, 10)
+    local lbl = pnl_vis:Add("DLabel")
+    lbl:SetText("ESP, Misc")
+    lbl:SetFont("ML_Subtitle")
+    lbl:SetTextColor(Color(255, 196, 241))
+    lbl:Dock(TOP)
+    lbl:SetContentAlignment(5)
+    
+    Empty(pnl_vis, 10)
+    CreateCheckbox(pnl_vis, "Enable ESP", "ml_esp")
+    CreateCheckbox(pnl_vis, "3D Box", "ml_esp_box")
+    CreateCheckbox(pnl_vis, "Health Bar", "ml_esp_healthbar")
+    CreateCheckbox(pnl_vis, "Chams", "ml_chams")
+    
+    Empty(pnl_vis, 5)
+    local drop_chams = StyleDropdown(pnl_vis, "Chams Material")
+    drop_chams:SetConVar("ml_chams_mat")
+    for k, v in ipairs(chams_materials) do drop_chams:AddChoice(v.name, k) end
+    drop_chams.OnSelect = function(self, index, value, data) RunConsoleCommand("ml_chams_mat", tostring(data)) end
 
-        local unhook = p:Add("DButton")
-        unhook:SetText("UNHOOK")
-        unhook:SetTall(35)
-        unhook:DockMargin(0, 5, 0, 5)
-        unhook:SetFont("ML_Subtitle")
-        unhook:SetTextColor(Color(255, 255, 255))
+    Empty(pnl_vis, 10)
+    CreateCheckbox(pnl_vis, "Prop X-Ray", "ml_xray")
+    CreateCheckbox(pnl_vis, "Tracers", "ml_tracers")
+    CreateCheckbox(pnl_vis, "Enable FOV", "ml_fov_enable")
+    
+    local fov_container = pnl_vis:Add("DPanel")
+    fov_container:Dock(TOP)
+    fov_container:SetTall(25)
+    fov_container:DockMargin(10,-24,16,0)
+    fov_container.Paint = function() end
+    
+    local slider_fov = fov_container:Add("DNumSlider")
+    slider_fov:Dock(FILL)
+    slider_fov:SetMin(50)
+    slider_fov:SetMax(140)
+    slider_fov:SetDecimals(0)
+    slider_fov:SetConVar("ml_fov_value")
+    slider_fov.Slider.Paint = function(s, w, h) surface.SetDrawColor(55,55,55) surface.DrawRect(5, h/2, w, 2) end
+    slider_fov.Slider.Knob.Paint = function(s, w, h) draw.RoundedBox(30, 2, 2, w - 4, h - 4, Color(255, 196, 241)) end
 
-        local col_idle = Color(45, 25, 25)
-        local col_hover = Color(70, 30, 30)
+    local pnl_game = vgui.Create("DScrollPanel", content_area)
+    pnl_game:Dock(FILL)
+    pnl_game:SetVisible(false)
+    pnl_game:DockPadding(15, 0, 5, 0)
+    panels["GAMEPLAY"] = pnl_game
 
-        unhook.Paint = function(self, w, h)
-            local targetCol = self:IsHovered() and col_hover or col_idle
-            draw.RoundedBox(6, 0, 0, w, h, targetCol)
+    Empty(pnl_game, 10)
+    local lbl2 = pnl_game:Add("DLabel")
+    lbl2:SetText("GAMEPLAY")
+    lbl2:SetFont("ML_Subtitle")
+    lbl2:SetTextColor(Color(255, 196, 241))
+    lbl2:Dock(TOP)
+    lbl2:SetContentAlignment(5)
 
-            surface.SetDrawColor(255, 255, 255, 5)
-            surface.DrawOutlinedRect(0, 0, w, h)
+    Empty(pnl_game, 10)
+    CreateCheckbox(pnl_game, "Aimbot (Master)", "ml_silent_aim")
+    CreateCheckbox(pnl_game, "Propkill Mode (Prediction)", "ml_aimbot")
+    Empty(pnl_game, 10) 
+    CreateCheckbox(pnl_game, "Bhop", "ml_bhop")
+
+    local pnl_misc = vgui.Create("DScrollPanel", content_area)
+    pnl_misc:Dock(FILL)
+    pnl_misc:SetVisible(false)
+    pnl_misc:DockPadding(15, 0, 5, 0)
+    panels["MISC"] = pnl_misc
+
+    Empty(pnl_misc, 10)
+    local lbl3 = pnl_misc:Add("DLabel")
+    lbl3:SetText("MISC")
+    lbl3:SetFont("ML_Subtitle")
+    lbl3:SetTextColor(Color(255, 196, 241))
+    lbl3:Dock(TOP)
+    lbl3:SetContentAlignment(5)
+
+    Empty(pnl_misc, 10)
+    CreateCheckbox(pnl_misc, "Hitsounds", "ml_prop_hitsounds")
+    local drop_hits = StyleDropdown(pnl_misc, "Hitsound Selection")
+    drop_hits:SetConVar("ml_hitsound_select")
+    for k, v in ipairs(hitsounds_list) do drop_hits:AddChoice(v.name, k) end
+    drop_hits.OnSelect = function(self, index, value, data) RunConsoleCommand("ml_hitsound_select", tostring(data)) end
+
+    Empty(pnl_misc, 5) 
+    CreateCheckbox(pnl_misc, "Crosshair", "ml_custom_crosshair")
+    CreateCheckbox(pnl_misc, "Third Person", "ml_3rdperson")
+
+    Empty(pnl_misc, 20) 
+    local btn_unhook = pnl_misc:Add("DButton")
+    btn_unhook:SetText("UNHOOK")
+    btn_unhook:SetFont("ML_Subtitle")
+    btn_unhook:SetTall(35)
+    btn_unhook:Dock(TOP)
+    btn_unhook:DockMargin(0, 20, 0, 0)
+    btn_unhook:SetTextColor(Color(255, 255, 255))
+    btn_unhook.Paint = function(s, w, h)
+        local c = s:IsHovered() and Color(70, 30, 30) or Color(45, 25, 25)
+        draw.RoundedBox(6, 0, 0, w, h, c)
+        surface.SetDrawColor(255, 255, 255, 10)
+        surface.DrawOutlinedRect(0, 0, w, h)
+    end
+    btn_unhook.DoClick = function() UnhookMatcha() end
+
+local nav_bar = vgui.Create("DPanel", frame)
+    nav_bar:SetSize(frame:GetWide(), 30)
+    nav_bar:SetPos(0, 25) 
+    nav_bar.Paint = function() end
+
+    local nav_container = vgui.Create("DPanel", nav_bar)
+    nav_container.Paint = function() end
+
+    local function SwitchTab(name)
+        active_tab = name
+        for k, pnl in pairs(panels) do
+            if k == name then pnl:SetVisible(true) else pnl:SetVisible(false) end
+        end
+    end
+
+local tabs = {"VISUALS", "GAMEPLAY", "MISC"}
+    local last_x = 0
+    local spacing = 0
+
+    for i, name in ipairs(tabs) do
+        local btn = vgui.Create("DButton", nav_container)
+        btn:SetText(name)
+        btn:SetFont("ML_Subtitle")
+        btn:SizeToContents()
+        btn:SetWide(btn:GetWide() + 10)
+        btn:SetPos(last_x, 0)
+        btn:SetTall(20)
+        
+        last_x = last_x + btn:GetWide() + spacing
+        
+        btn.ColorVal = active_tab == name and col_accent or col_text_off
+        btn.Paint = function(self, w, h)
+            local target_col = (active_tab == name) and col_accent or col_text_off
+            self.ColorVal = LerpColor(FrameTime() * 10, self.ColorVal, target_col)
+            self:SetTextColor(self.ColorVal)
         end
         
-        unhook.DoClick = function()
-            UnhookMatcha()
-        end
-    end)
+        btn.DoClick = function() SwitchTab(name) end
+    end
+nav_container:SetWide(last_x - spacing)
+    nav_container:SetPos((nav_bar:GetWide() - nav_container:GetWide()) / 2.1, 0)
+    SwitchTab(active_tab)
 end
-
 concommand.Add("matcha_menu", OpenMenu)
 
 local menu_pressed = false
