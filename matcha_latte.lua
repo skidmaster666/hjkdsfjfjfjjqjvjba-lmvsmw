@@ -22,6 +22,11 @@ local hitsounds_list = {
 local watermark_fps = 0
 local watermark_last_update = CurTime()
 
+local last_hitsound_time = 0
+
+local killfeed_entries = {}
+local killfeed_lifetime = 5
+local killfeed_spacing = 35
 
 RunConsoleCommand("cl_updaterate", "1000")
 RunConsoleCommand("cl_cmdrate", "0")
@@ -82,6 +87,9 @@ end
 
 
 local function PlayEnhanced2DSound()
+    if CurTime() - last_hitsound_time < 0.1 then return end
+    last_hitsound_time = CurTime()
+
     local selection = math.Clamp(GetConVarNumber("ml_hitsound_select"), 1, #hitsounds_list)
     local sndData = hitsounds_list[selection]
     local fileName = sndData.file
@@ -91,14 +99,12 @@ local function PlayEnhanced2DSound()
         return 
     end
 
-    for i = 1, 3 do
-        sound.PlayFile("data/" .. fileName, "nopitch mono", function(station)
-            if IsValid(station) then
-                station:SetVolume(1.0)
-                station:Play()
-            end
-        end)
-    end
+    sound.PlayFile("data/" .. fileName, "nopitch mono", function(station)
+        if IsValid(station) then
+            station:SetVolume(1.0)
+            station:Play()
+        end
+    end)
 end
 
 
@@ -183,7 +189,10 @@ local function UnhookMatcha()
         {"entity_killed", "ML_PropHitsound"},
         {"HUDPaint", "ML_CustomCrosshair"},
         {"HUDShouldDraw", "ML_HideCrosshair"},
-        {"PostDrawTranslucentRenderables", "ML_3DBox"}
+        {"DrawDeathNotice", "ML_DisableDefaultKillfeed"},
+        {"PostDrawTranslucentRenderables", "ML_3DBox"},
+        {"entity_killed", "ML_Killfeed_Capture"},
+        {"HUDPaint", "ML_Killfeed_Render"}
     }
 
     for _, v in pairs(hooks) do
@@ -275,6 +284,90 @@ hook.Add("PostDrawTranslucentRenderables", "ML_3DBox", function()
     end
     
     cam.End3D()
+end)
+
+hook.Add("DrawDeathNotice", "ML_DisableDefaultKillfeed", function()
+    if GetConVarNumber("ml_enabled") == 0 then return end
+    return false
+end)
+
+hook.Add("entity_killed", "ML_Killfeed_Capture", function(data)
+if GetConVarNumber("ml_enabled") == 0 then return end
+    
+    local victim = Entity(data.entindex_killed)
+    local inflictor = Entity(data.entindex_inflictor)
+    local attacker = Entity(data.entindex_attacker)
+    
+    if not IsValid(victim) or not victim:IsPlayer() then return end
+
+    local attacker_name = "World"
+
+    if IsValid(attacker) and attacker:IsPlayer() then
+        attacker_name = attacker:Nick()
+    elseif IsValid(inflictor) then
+        local owner = inflictor:GetNWEntity("PropOwner", nil)
+        if not IsValid(owner) then owner = inflictor:GetOwner() end
+        
+        if IsValid(owner) and owner:IsPlayer() then
+            attacker_name = owner:Nick()
+        elseif inflictor:GetClass() == "prop_physics" then
+            attacker_name = "Physics Prop"
+        end
+    end
+
+    if attacker_name == victim:Nick() then attacker_name = "Suicide" end
+
+    local kill_text = attacker_name .. "      ►      " .. victim:Nick()
+
+    table.insert(killfeed_entries, {
+        text = kill_text,
+        time = CurTime(),
+        x = ScrW() + 400,
+        alpha = 0
+    })
+end)
+
+hook.Add("HUDPaint", "ML_Killfeed_Render", function()
+    if GetConVarNumber("ml_enabled") == 0 then return end
+
+    local start_y = 60
+    local right_margin = 20
+    local dt = FrameTime()
+    local accent_color = PulseColor()
+    
+    for i, entry in ipairs(killfeed_entries) do
+        local time_delta = CurTime() - entry.time
+        if time_delta > killfeed_lifetime then
+            table.remove(killfeed_entries, i)
+            continue
+        end
+
+        surface.SetFont("ML_Subtitle")
+        local text_w, text_h = surface.GetTextSize(entry.text)
+        local box_width = text_w + 30
+        local box_height = 25
+
+        local target_x = ScrW() - box_width - right_margin
+
+        entry.x = Lerp(dt * 10, entry.x, target_x)
+        
+        local current_y = start_y + ((i - 1) * killfeed_spacing)
+        local alpha = 255
+        if time_delta > (killfeed_lifetime - 0.5) then
+            alpha = 255 * ((killfeed_lifetime - time_delta) / 0.5)
+        end
+
+        draw.RoundedBox(4, entry.x, current_y, box_width, box_height, Color(20, 20, 20, alpha))
+        
+        surface.SetDrawColor(accent_color.r, accent_color.g, accent_color.b, alpha)
+        surface.DrawOutlinedRect(entry.x, current_y, box_width, box_height, 1)
+        
+        surface.SetDrawColor(0, 0, 0, alpha)
+        surface.DrawOutlinedRect(entry.x - 1, current_y - 1, box_width + 2, box_height + 2, 1)
+        surface.DrawOutlinedRect(entry.x - 2, current_y - 2, box_width + 4, box_height + 4, 1)
+
+        draw.SimpleTextOutlined(entry.text, "ML_Subtitle", entry.x + (box_width / 2), current_y + (box_height / 2), Color(255, 255, 255, alpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0, 0, 0, alpha))
+    end
 end)
 
 hook.Add("HUDPaint", "ML_HealthAmmo", function()
@@ -921,7 +1014,7 @@ local function OpenMenu()
             lbl:SetFont("ML_Text")
             lbl:SetTextColor(Color(100, 100, 100))
             lbl:Dock(TOP)
-            lbl:SetContentAlignment(5)
+            lbl:SetContentAlignment(4)
             lbl:DockMargin(0, 5, 0, 2)
         end
     
@@ -1053,9 +1146,7 @@ local function OpenMenu()
     CreateCheckbox(pnl_vis, "3D Box", "ml_esp_box")
     CreateCheckbox(pnl_vis, "Health Bar", "ml_esp_healthbar")
     CreateCheckbox(pnl_vis, "Chams", "ml_chams")
-    
-    Empty(pnl_vis, 5)
-    local drop_chams = StyleDropdown(pnl_vis, "Chams Material")
+    local drop_chams = StyleDropdown(pnl_vis, "  Chams Material")
     drop_chams:SetConVar("ml_chams_mat")
     for k, v in ipairs(chams_materials) do drop_chams:AddChoice(v.name, k) end
     drop_chams.OnSelect = function(self, index, value, data) RunConsoleCommand("ml_chams_mat", tostring(data)) end
@@ -1063,22 +1154,65 @@ local function OpenMenu()
     Empty(pnl_vis, 10)
     CreateCheckbox(pnl_vis, "Prop X-Ray", "ml_xray")
     CreateCheckbox(pnl_vis, "Tracers", "ml_tracers")
-    CreateCheckbox(pnl_vis, "Enable FOV", "ml_fov_enable")
-    
-    local fov_container = pnl_vis:Add("DPanel")
-    fov_container:Dock(TOP)
-    fov_container:SetTall(25)
-    fov_container:DockMargin(10,-24,16,0)
-    fov_container.Paint = function() end
-    
-    local slider_fov = fov_container:Add("DNumSlider")
+Empty(pnl_vis, 10)
+
+    local fov_row = pnl_vis:Add("DPanel")
+    fov_row:Dock(TOP)
+    fov_row:SetTall(30)
+    fov_row:DockMargin(10, 0, 10, 0)
+    fov_row.Paint = function() end
+
+    local cb_fov = fov_row:Add("DCheckBoxLabel")
+    cb_fov:SetText("Enable FOV")
+    cb_fov:SetConVar("ml_fov_enable")
+    cb_fov:SetFont("ML_Text")
+    cb_fov:Dock(LEFT)
+    cb_fov:SetWide(100)
+    cb_fov.Button.Paint = function(panel, w, h)
+        draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 35))
+        if cb_fov:GetChecked() then
+            draw.RoundedBox(4, 2, 2, w - 4, h - 4, Color(255, 196, 241))
+        end
+    end
+    cb_fov.Think = function(self)
+        self:SetTextColor(self:GetChecked() and Color(255, 196, 241) or Color(100, 100, 100))
+    end
+
+    local slider_fov = fov_row:Add("DNumSlider")
     slider_fov:Dock(FILL)
     slider_fov:SetMin(50)
     slider_fov:SetMax(140)
     slider_fov:SetDecimals(0)
     slider_fov:SetConVar("ml_fov_value")
-    slider_fov.Slider.Paint = function(s, w, h) surface.SetDrawColor(55,55,55) surface.DrawRect(5, h/2, w, 2) end
-    slider_fov.Slider.Knob.Paint = function(s, w, h) draw.RoundedBox(30, 2, 2, w - 4, h - 4, Color(255, 196, 241)) end
+    slider_fov:SetText("") 
+
+    if IsValid(slider_fov.Label) then slider_fov.Label:SetVisible(false) end
+
+    slider_fov.Slider.Paint = function(s, w, h) 
+        surface.SetDrawColor(55, 55, 55) 
+        surface.DrawRect(0, h/2 - 1, w, 2) 
+    end
+    slider_fov.Slider.Knob.Paint = function(s, w, h) 
+        draw.RoundedBox(30, 2, 2, w - 4, h - 4, Color(255, 196, 241)) 
+    end
+
+    if IsValid(slider_fov.TextArea) then
+        slider_fov.TextArea:SetTextColor(Color(255, 255, 255))
+        slider_fov.TextArea:SetFont("ML_Text")
+        slider_fov.TextArea:SetWide(25)
+        slider_fov.TextArea:SetDrawBackground(false)
+        slider_fov.TextArea:SetDrawBorder(false)
+        slider_fov.TextArea.Think = function(self)
+            self:SetTextColor(Color(255, 255, 255))
+        end
+    end
+
+    slider_fov.Think = function(self)
+        local val = GetConVar("ml_fov_value"):GetFloat()
+        if self:GetValue() != val and not self.Slider:IsEditing() then
+            self:SetValue(val)
+        end
+    end
 
     local pnl_game = vgui.Create("DScrollPanel", content_area)
     pnl_game:Dock(FILL)
@@ -1116,7 +1250,7 @@ local function OpenMenu()
 
     Empty(pnl_misc, 10)
     CreateCheckbox(pnl_misc, "Hitsounds", "ml_prop_hitsounds")
-    local drop_hits = StyleDropdown(pnl_misc, "Hitsound Selection")
+    local drop_hits = StyleDropdown(pnl_misc, "  Hitsound")
     drop_hits:SetConVar("ml_hitsound_select")
     for k, v in ipairs(hitsounds_list) do drop_hits:AddChoice(v.name, k) end
     drop_hits.OnSelect = function(self, index, value, data) RunConsoleCommand("ml_hitsound_select", tostring(data)) end
