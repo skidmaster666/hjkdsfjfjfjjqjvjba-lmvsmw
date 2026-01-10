@@ -28,6 +28,8 @@ local killfeed_entries = {}
 local killfeed_lifetime = 5
 local killfeed_spacing = 35
 
+local cycleSpeed = 300
+
 RunConsoleCommand("cl_updaterate", "1000")
 RunConsoleCommand("cl_cmdrate", "0")
 RunConsoleCommand("cl_interp", "0")
@@ -53,37 +55,37 @@ local config_convars = {
     "ml_3rdperson", "ml_ping_predict", "ml_fps_saver", "ml_aimbot", 
     "ml_aimbot_smooth", "ml_aimbot_fov", "ml_health_ammo", 
     "ml_prop_hitsounds", "ml_silent_aim",
-    "ml_custom_crosshair", "ml_draw_fov"
+    "ml_custom_crosshair", "ml_draw_fov", "ml_rgbgun", "ml_hitsound_select"
 }
 
 CreateClientConVar("ml_enabled", 1, true, false)
-CreateClientConVar("ml_esp", 1, true, false)
-CreateClientConVar("ml_chams", 1, true, false)
-CreateClientConVar("ml_xray", 1, true, false)
-CreateClientConVar("ml_esp_box", 1, true, false)
-CreateClientConVar("ml_tracers", 1, true, false)
-CreateClientConVar("ml_esp_healthbar", 1, true, false)
+CreateClientConVar("ml_esp", 0, true, false)
+CreateClientConVar("ml_chams", 0, true, false)
+CreateClientConVar("ml_xray", 0, true, false)
+CreateClientConVar("ml_esp_box", 0, true, false)
+CreateClientConVar("ml_tracers", 0, true, false)
+CreateClientConVar("ml_esp_healthbar", 0, true, false)
 CreateClientConVar("ml_chams_mat", 1, true, false)
-CreateClientConVar("ml_hitsound_select", 1, true, false)
+CreateClientConVar("ml_hitsound_select", 0, true, false)
 CreateClientConVar("ml_trajectory", 1, true, false)
 CreateClientConVar("ml_headbeams", 1, true, false)
 CreateClientConVar("ml_physline", 1, true, false)
 CreateClientConVar("ml_watermark", 1, true, false)
-CreateClientConVar("ml_velocity_hud", 1, true, false)
-CreateClientConVar("ml_bhop", 1, true, false)
-CreateClientConVar("ml_fov_enable", 1, true, false)
-CreateClientConVar("ml_fov_value", 110, true, false)
+CreateClientConVar("ml_velocity_hud", 0, true, false)
+CreateClientConVar("ml_bhop", 0, true, false)
+CreateClientConVar("ml_fov_enable", 0, true, false)
+CreateClientConVar("ml_fov_value", 70, true, false)
 CreateClientConVar("ml_3rdperson", 0, true, false)
-CreateClientConVar("ml_ping_predict", 1, true, false)
 CreateClientConVar("ml_fps_saver", 1, true, false)
 CreateClientConVar("ml_aimbot", 0, true, false)
 CreateClientConVar("ml_aimbot_smooth", 0, true, false, "Aimbot Smoothing") 
 CreateClientConVar("ml_aimbot_fov", 20, true, false, "Aimbot FOV")
 CreateClientConVar("ml_health_ammo", 1, true, false)
-CreateClientConVar("ml_prop_hitsounds", 1, true, false)
+CreateClientConVar("ml_prop_hitsounds", 0, true, false)
 CreateClientConVar("ml_silent_aim", 0, true, false)
 CreateClientConVar("ml_custom_crosshair", 0, true, false)
-CreateClientConVar("ml_draw_fov", 1, true, false)
+CreateClientConVar("ml_draw_fov", 0, true, false)
+CreateClientConVar("ml_rgbgun", 0, true, false)
 
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
@@ -229,7 +231,8 @@ local function UnhookMatcha()
         {"entity_killed", "ML_Killfeed_Capture"},
         {"HUDPaint", "ML_Killfeed_Render"},
         {"HUDPaint", "ML_DrawFOVCircle"},
-        {"CreateMove", "ML_PropkillAim"}
+        {"CreateMove", "ML_PropkillAim"},
+        {"Think", "FastRGBPhysgun"}
     }
 
     for _, v in pairs(hooks) do
@@ -260,6 +263,21 @@ local function UnhookMatcha()
 
     ML = nil
 end
+
+hook.Add("Think", "FastRGBPhysgun", function()
+    if GetConVarNumber("ml_rgbgun") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return end
+
+    local activeWep = ply:GetActiveWeapon()
+    if IsValid(activeWep) and activeWep:GetClass() == "weapon_physgun" then
+
+        local hue = (CurTime() * cycleSpeed) % 360
+        local col = HSVToColor(hue, 1, 1)
+
+        ply:SetWeaponColor(Vector(col.r / 255, col.g / 255, col.b / 255))
+    end
+end)
 
 hook.Add("HUDPaint", "ML_ESP", function()
     if GetConVarNumber("ml_esp") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
@@ -509,37 +527,54 @@ hook.Add("PreDrawHalos", "ML_Halos", function()
 end)
 
 
+local xray_active = false
+
 hook.Add("PreDrawEffects", "ML_XRAY", function()
-    if GetConVarNumber("ml_xray") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
+    local enabled = GetConVarNumber("ml_xray") ~= 0 and GetConVarNumber("ml_enabled") ~= 0
+
+    if not enabled then
+        if xray_active then
+            for _, prop in pairs(ents.FindByClass("prop_physics")) do
+                if IsValid(prop) then prop:SetColor(Color(255, 255, 255, 255)) end
+            end
+            xray_active = false
+        end
+        return 
+    end
+
+    xray_active = true
+    local glow = math.sin(RealTime() * 3) * 0.4 + 0.6
+
     for _, prop in pairs(ents.FindByClass("prop_physics")) do
-        local glow = math.sin(RealTime() * 3) * 0.4 + 0.6
+        if not IsValid(prop) then continue end
+
         prop:SetColor(Color(0, 0, 0, 0))
+        prop:SetRenderMode(RENDERMODE_TRANSALPHA)
 
         cam.IgnoreZ(true)
-        prop:SetRenderMode(RENDERMODE_TRANSALPHA)
         render.SuppressEngineLighting(true)
+
         render.MaterialOverride(Material("models/effects/comball_sphere"))
         render.SetColorModulation(1 * glow, 0.76 * glow, 0.94 * glow)
         render.SetBlend(0.5)
         prop:DrawModel()
-        render.SuppressEngineLighting(false)
 
-        cam.IgnoreZ(false)
-        cam.IgnoreZ(true)
-        prop:SetRenderMode(RENDERMODE_TRANSALPHA)
-        render.SuppressEngineLighting(true)
         render.MaterialOverride(Material("!ML_GLOW"))
-        render.SetColorModulation(1 * glow, 0.76 * glow, 0.94 * glow)
         render.SetBlend(0.7)
         prop:DrawModel()
+
         render.SuppressEngineLighting(false)
         cam.IgnoreZ(false)
-        
+
         local pulse = 0.5 + math.sin(RealTime() * 2) * 0.5
         cam.IgnoreZ(true)
         render.DrawWireframeBox(prop:GetPos(), prop:GetAngles(), prop:OBBMaxs() * (1 + pulse * 0.08), prop:OBBMins() * (1 + pulse * 0.08), Color(255, 196, 241, 180))
         cam.IgnoreZ(false)
     end
+
+    render.MaterialOverride(nil)
+    render.SetColorModulation(1, 1, 1)
+    render.SetBlend(1)
 end)
 
 hook.Add("RenderScreenspaceEffects", "ML_Trajectory", function()
@@ -1242,6 +1277,7 @@ local function OpenMenu()
     CreateCheckbox(pnl_vis, "Prop X-Ray", "ml_xray")
     CreateCheckbox(pnl_vis, "Tracers", "ml_tracers")
     CreateCheckbox(pnl_vis, "Draw Aimbot FOV", "ml_draw_fov")
+    CreateCheckbox(pnl_vis, "Velocity HUD", "ml_velocity_hud")
 
     Empty(pnl_vis, 10)
 
@@ -1406,7 +1442,7 @@ CreateWhiteSlider(pnl_game, "Smoothness", "ml_aimbot_smooth", 0, 2, 2)
 Empty(pnl_game, 10)
     CreateCheckbox(pnl_game, "Bhop", "ml_bhop")
     local children = pnl_game:GetCanvas():GetChildren()
-local last_cb = children[#children]
+    local last_cb = children[#children]
 
 if IsValid(last_cb) then
     last_cb:Dock(TOP)
@@ -1416,27 +1452,53 @@ end
     local pnl_misc = vgui.Create("DScrollPanel", content_area)
     pnl_misc:Dock(FILL)
     pnl_misc:SetVisible(false)
-    pnl_misc:DockPadding(15, 0, 5, 0)
+    pnl_misc:GetCanvas():DockPadding(5, 0, 5, 0)
     panels["MISC"] = pnl_misc
 
     Empty(pnl_misc, 10)
-    local lbl3 = pnl_misc:Add("DLabel")
-    lbl3:SetText("MISC")
-    lbl3:SetFont("ML_Subtitle")
-    lbl3:SetTextColor(Color(255, 196, 241))
-    lbl3:Dock(TOP)
-    lbl3:SetContentAlignment(5)
+local title_row2 = pnl_misc:Add("DPanel")
+title_row2:Dock(TOP)
+title_row2:SetTall(20)
+title_row2:DockMargin(0, 0, 0, 0)
+title_row2.Paint = function() end
+
+local lbl_misc = title_row2:Add("DLabel")
+lbl_misc:SetText("                         Misc.")
+lbl_misc:SetFont("ML_Subtitle")
+lbl_misc:SetTextColor(Color(255, 196, 241))
+lbl_misc:Dock(LEFT)
+lbl_misc:SetWide(150)
+lbl_misc:SetContentAlignment(4)
+
+
+local lbl_fun = title_row2:Add("DLabel")
+lbl_fun:SetText("                  Fun   ")
+lbl_fun:SetFont("ML_Subtitle")
+lbl_fun:SetTextColor(Color(255, 196, 241))
+lbl_fun:Dock(LEFT)
+lbl_fun:SetWide(200) 
+lbl_fun:SetContentAlignment(4)
+
+lbl_fun:DockMargin(110, 0, 0, 0)
+    
 
     Empty(pnl_misc, 10)
     CreateCheckbox(pnl_misc, "Hitsounds", "ml_prop_hitsounds")
-    local drop_hits = StyleDropdown(pnl_misc, "  Hitsound")
+    local hitsound_container = pnl_misc:Add("DPanel")
+    hitsound_container:Dock(TOP)
+    hitsound_container:SetTall(60)
+    hitsound_container.Paint = function() end
+
+    local drop_hits = StyleDropdown(hitsound_container, "    Hitsound")
+    drop_hits:Dock(LEFT)
+    drop_hits:SetWide(210)
+    drop_hits:DockMargin(10, 0, 0, 10)
     drop_hits:SetConVar("ml_hitsound_select")
     for k, v in ipairs(hitsounds_list) do drop_hits:AddChoice(v.name, k) end
     drop_hits.OnSelect = function(self, index, value, data) RunConsoleCommand("ml_hitsound_select", tostring(data)) end
 
     Empty(pnl_misc, 5) 
     CreateCheckbox(pnl_misc, "Crosshair", "ml_custom_crosshair")
-    CreateCheckbox(pnl_misc, "Third Person", "ml_3rdperson")
 
     Empty(pnl_misc, 20) 
     local btn_unhook = pnl_misc:Add("DButton")
@@ -1453,6 +1515,22 @@ end
         surface.DrawOutlinedRect(0, 0, w, h)
     end
     btn_unhook.DoClick = function() UnhookMatcha() end
+
+    CreateCheckbox(pnl_misc, "Third Person", "ml_3rdperson")
+local children1 = pnl_misc:GetCanvas():GetChildren()
+local item1 = children1[#children1]
+if IsValid(item1) then
+    item1:Dock(TOP)
+    item1:DockMargin(250, -180, 0, 0)
+end
+    CreateCheckbox(pnl_misc, "RGB Physgun", "ml_rgbgun")
+
+    local children2 = pnl_misc:GetCanvas():GetChildren()
+local item2 = children2[#children2]
+if IsValid(item2) then
+    item2:Dock(TOP)
+    item2:DockMargin(250, 5, 0, 0)
+end
 
 local nav_bar = vgui.Create("DPanel", frame)
     nav_bar:SetSize(frame:GetWide(), 30)
