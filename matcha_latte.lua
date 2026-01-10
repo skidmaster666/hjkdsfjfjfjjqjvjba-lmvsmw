@@ -1,5 +1,5 @@
 local ML = {
-    version = 1.3, 
+    version = 1.4, 
     propkills = 0, 
     max_vel = 0, 
     current_vel = 0, 
@@ -45,6 +45,17 @@ local chams_materials = {
     {name = "Plastic", mat = "models/debug/debugwhite"},
 }
 
+local config_convars = {
+    "ml_enabled", "ml_esp", "ml_chams", "ml_xray", "ml_esp_box", 
+    "ml_tracers", "ml_esp_healthbar", "ml_chams_mat", "ml_hitsound_select", 
+    "ml_trajectory", "ml_headbeams", "ml_physline", "ml_watermark", 
+    "ml_velocity_hud", "ml_bhop", "ml_fov_enable", "ml_fov_value", 
+    "ml_3rdperson", "ml_ping_predict", "ml_fps_saver", "ml_aimbot", 
+    "ml_aimbot_smooth", "ml_aimbot_fov", "ml_health_ammo", 
+    "ml_prop_hitsounds", "ml_silent_aim",
+    "ml_custom_crosshair", "ml_draw_fov"
+}
+
 CreateClientConVar("ml_enabled", 1, true, false)
 CreateClientConVar("ml_esp", 1, true, false)
 CreateClientConVar("ml_chams", 1, true, false)
@@ -66,13 +77,13 @@ CreateClientConVar("ml_3rdperson", 0, true, false)
 CreateClientConVar("ml_ping_predict", 1, true, false)
 CreateClientConVar("ml_fps_saver", 1, true, false)
 CreateClientConVar("ml_aimbot", 0, true, false)
-CreateClientConVar("ml_aimbot_smooth", 0, true, false, "Enable smoothing") 
-CreateClientConVar("ml_aimbot_fov", 180, true, false, "Aimbot FOV")
+CreateClientConVar("ml_aimbot_smooth", 0, true, false, "Aimbot Smoothing") 
+CreateClientConVar("ml_aimbot_fov", 20, true, false, "Aimbot FOV")
 CreateClientConVar("ml_health_ammo", 1, true, false)
 CreateClientConVar("ml_prop_hitsounds", 1, true, false)
 CreateClientConVar("ml_silent_aim", 0, true, false)
-CreateClientConVar("ml_fullbright", 0, true, false)
 CreateClientConVar("ml_custom_crosshair", 0, true, false)
+CreateClientConVar("ml_draw_fov", 1, true, false)
 
 
 surface.CreateFont("ML_Title", {font = "Verdana", size = 32, weight = 900, antialias = true})
@@ -85,6 +96,29 @@ local function PulseColor()
     return Color(255 * pulse, 196 * pulse, 241 * pulse, 255)
 end
 
+local function LoadConfig()
+    if not file.Exists("matcha_config.json", "DATA") then return end
+    local json = file.Read("matcha_config.json", "DATA")
+    local data = util.JSONToTable(json)
+    
+    if data then
+        for _, cvar in pairs(config_convars) do
+            if data[cvar] != nil then
+                RunConsoleCommand(cvar, tostring(data[cvar]))
+            end
+        end
+    end
+end
+
+local function SaveConfig()
+    local data = {}
+    for _, cvar in pairs(config_convars) do
+        data[cvar] = GetConVarNumber(cvar)
+    end
+    file.Write("matcha_config.json", util.TableToJSON(data, true))
+end
+
+LoadConfig()
 
 local function PlayEnhanced2DSound()
     if CurTime() - last_hitsound_time < 0.1 then return end
@@ -165,6 +199,7 @@ local function IsOutOfView(ent)
 end
 
 local function UnhookMatcha()
+    SaveConfig()
 
     local hooks = {
         {"HUDPaint", "ML_ESP"},
@@ -192,7 +227,9 @@ local function UnhookMatcha()
         {"DrawDeathNotice", "ML_DisableDefaultKillfeed"},
         {"PostDrawTranslucentRenderables", "ML_3DBox"},
         {"entity_killed", "ML_Killfeed_Capture"},
-        {"HUDPaint", "ML_Killfeed_Render"}
+        {"HUDPaint", "ML_Killfeed_Render"},
+        {"HUDPaint", "ML_DrawFOVCircle"},
+        {"CreateMove", "ML_PropkillAim"}
     }
 
     for _, v in pairs(hooks) do
@@ -240,11 +277,14 @@ hook.Add("HUDPaint", "ML_ESP", function()
 
             if GetConVarNumber("ml_esp_healthbar") == 1 then
                 local h = bottom.y - top.y
-                local w = h * 0.5
+                local w = h * 0.65
+
+                local distance = LocalPlayer():GetPos():Distance(ply:GetPos())
+                local scaleFactor = math.Clamp(1 - (distance / 2000), 0.3, 1)
+                local barW = 5 * scaleFactor
 
                 local barX = top.x + (w * 0.6) 
                 local barY = top.y
-                local barW = 2
                 local barH = h
                 
                 local hp = math.Clamp(ply:Health(), 0, 100)
@@ -254,9 +294,6 @@ hook.Add("HUDPaint", "ML_ESP", function()
 
                 surface.SetDrawColor(0, 0, 0, 200)
                 surface.DrawRect(barX, barY, barW, barH)
-
-                surface.SetDrawColor(0, 0, 0, 255)
-                surface.DrawOutlinedRect(barX - 1, barY - 1, barW + 2, barH + 2)
 
                 local col = Color(255 - (hpPercent * 255), hpPercent * 255, 0)
                 surface.SetDrawColor(col.r, col.g, col.b, 255)
@@ -270,6 +307,7 @@ hook.Add("HUDPaint", "ML_ESP", function()
         end
     end
 end)
+
 hook.Add("PostDrawTranslucentRenderables", "ML_3DBox", function()
     if GetConVarNumber("ml_esp") == 0 or GetConVarNumber("ml_esp_box") == 0 or GetConVarNumber("ml_enabled") == 0 then return end
     
@@ -395,14 +433,7 @@ hook.Add("HUDPaint", "ML_HealthAmmo", function()
     
     draw.RoundedBox(4, x, y, barWidth, barHeight, Color(35, 35, 35))
 
-    local healthColor
-    if healthPercent > 0.5 then
-        local greenAmount = (healthPercent - 0.5) * 2
-        healthColor = Color(100 - (greenAmount * 50), 220, 100)
-    else
-        local redAmount = healthPercent * 2
-        healthColor = Color(255, 120 * redAmount, 120 * redAmount)
-    end
+    local healthColor = Color(255 - (healthPercent * 255), healthPercent * 255, 0)
     
     draw.RoundedBox(4, x, y, barWidth * healthPercent, barHeight, healthColor)
     
@@ -548,6 +579,35 @@ hook.Add("HUDPaint", "ML_CustomCrosshair", function()
     surface.SetDrawColor(col.r, col.g, col.b, 255)
     for i = 1, 3 do
         surface.DrawCircle(x, y, 4 - i, 255, 255, 255, 255)
+    end
+end)
+
+hook.Add("HUDPaint", "ML_DrawFOVCircle", function()
+    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_draw_fov") == 0 then return end
+    
+    local fov_degrees = GetConVarNumber("ml_aimbot_fov")
+    if fov_degrees <= 0 then return end
+
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return end
+
+    local center_x = ScrW() / 2
+    local center_y = ScrH() / 2
+
+    local view_fov = ply:GetFOV()
+    local radius = math.tan(math.rad(fov_degrees) / 2) / math.tan(math.rad(view_fov) / 2) * (ScrW() / 2)
+
+    local col = PulseColor()
+    
+    local thickness = 2
+    
+    for i = 0, thickness - 1 do
+        surface.SetDrawColor(col.r, col.g, col.b, 255)
+        surface.DrawCircle(center_x, center_y, radius + i)
+        
+        surface.SetDrawColor(0, 0, 0, 100)
+        surface.DrawCircle(center_x, center_y, radius + i + 1)
+        surface.DrawCircle(center_x, center_y, radius - 1)
     end
 end)
 
@@ -735,8 +795,13 @@ hook.Add("entity_killed", "ML_PropKills", function(data)
     if IsValid(inflictor) and inflictor:GetClass() == "prop_physics" then
         if IsValid(victim) and victim:IsPlayer() and victim != LocalPlayer() then
             ML.propkills = ML.propkills + 1
-            timer.Simple(0.1, function()
-                LocalPlayer():ConCommand("say " .. ML.KillMessage)
+
+            if not ML.KillMessage or ML.KillMessage == "" then return end
+
+            local timerName = "matcha_say_kill_" .. CurTime()
+            
+            timer.Create(timerName, 0.1, 1, function()
+                RunConsoleCommand("say", ML.KillMessage)
             end)
         end
     end
@@ -819,18 +884,24 @@ local function GetTarget()
     if not LocalPlayer():Alive() then return nil end
     
     local bestEnt = nil
-    local bestFov = GetConVarNumber("ml_aimbot_fov") or 180
-    local myAng = LocalPlayer():GetViewPunchAngles() + LocalPlayer():EyeAngles()
+    local bestFov = GetConVarNumber("ml_aimbot_fov")
+    local propKillMode = GetConVarNumber("ml_aimbot") == 1
+
+    if propKillMode then bestFov = 360 end
+
     local myPos = LocalPlayer():EyePos()
+    local myForward = LocalPlayer():GetAimVector()
     
     for _, ply in pairs(player.GetAll()) do
         if IsValidPlayer(ply) then
-            local pos = ply:LocalToWorld(ply:OBBCenter())
-            local ang = (pos - myPos):Angle()
-            local diff = math.abs(math.NormalizeAngle(ang.y - myAng.y)) + math.abs(math.NormalizeAngle(ang.p - myAng.p))
+            local targetPos = ply:LocalToWorld(ply:OBBCenter())
+            local targetDir = (targetPos - myPos):GetNormalized()
+
+            local dot = myForward:Dot(targetDir)
+            local angleDiff = math.deg(math.acos(math.Clamp(dot, -1, 1)))
             
-            if diff < bestFov then
-                bestFov = diff
+            if angleDiff < bestFov then
+                bestFov = angleDiff
                 bestEnt = ply
             end
         end
@@ -839,10 +910,18 @@ local function GetTarget()
     return bestEnt
 end
 
-hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
-    if ML == nil then return end 
+local function NormalizeAngles(angles)
+    angles.p = math.NormalizeAngle(angles.p)
+    angles.y = math.NormalizeAngle(angles.y)
+    angles.r = 0
+    return angles
+end
 
-    if GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_silent_aim") == 0 then 
+
+local current_view_angles = Angle(0, 0, 0)
+
+hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
+    if ML == nil or GetConVarNumber("ml_enabled") == 0 or GetConVarNumber("ml_silent_aim") == 0 then 
         ML.aimbot_target = nil
         return 
     end
@@ -857,26 +936,31 @@ hook.Add("CreateMove", "ML_PropkillAim", function(cmd)
     end
 
     if IsValid(ML.aimbot_target) then
+        local propKillMode = GetConVarNumber("ml_aimbot") == 1
         local targetPos
-        local use_prediction = GetConVarNumber("ml_aimbot") == 1
-        
-        if use_prediction then
+
+        if propKillMode then
             targetPos = PredictPos(ML.aimbot_target)
         else
             targetPos = ML.aimbot_target:LocalToWorld(ML.aimbot_target:OBBCenter())
         end
 
         local myPos = LocalPlayer():EyePos()
-        local aimAngle = (targetPos - myPos):Angle()
+        local targetAngle = (targetPos - myPos):Angle()
+        targetAngle.p = math.NormalizeAngle(targetAngle.p)
+        targetAngle.y = math.NormalizeAngle(targetAngle.y)
 
-        aimAngle.p = math.NormalizeAngle(aimAngle.p)
-        aimAngle.y = math.NormalizeAngle(aimAngle.y)
+        local smooth = GetConVarNumber("ml_aimbot_smooth")
 
-        cmd:SetViewAngles(aimAngle)
+        if smooth > 0 and not propKillMode then
+            local currentAngles = cmd:GetViewAngles()
+            local lerpedAngle = LerpAngle(1 / (smooth + 1), currentAngles, targetAngle)
+            cmd:SetViewAngles(lerpedAngle)
+        else
+            cmd:SetViewAngles(targetAngle)
+        end
     end
 end)
-
-local oldPunch = Angle(0, 0, 0)
 
 gameevent.Listen("entity_killed")
 hook.Add("entity_killed", "ML_PropKills", function(data)
@@ -927,6 +1011,9 @@ local function OpenMenu()
     if IsValid(ml_frame) then
         if ml_frame.isClosing then return end
         ml_frame.isClosing = true 
+        
+        SaveConfig()
+
         menuX, menuY = ml_frame:GetPos()
         ml_frame:SetMouseInputEnabled(false)
         ml_frame:SetKeyboardInputEnabled(false)
@@ -1154,7 +1241,9 @@ local function OpenMenu()
     Empty(pnl_vis, 10)
     CreateCheckbox(pnl_vis, "Prop X-Ray", "ml_xray")
     CreateCheckbox(pnl_vis, "Tracers", "ml_tracers")
-Empty(pnl_vis, 10)
+    CreateCheckbox(pnl_vis, "Draw Aimbot FOV", "ml_draw_fov")
+
+    Empty(pnl_vis, 10)
 
     local fov_row = pnl_vis:Add("DPanel")
     fov_row:Dock(TOP)
@@ -1214,25 +1303,115 @@ Empty(pnl_vis, 10)
         end
     end
 
-    local pnl_game = vgui.Create("DScrollPanel", content_area)
+local pnl_game = vgui.Create("DScrollPanel", content_area)
     pnl_game:Dock(FILL)
     pnl_game:SetVisible(false)
-    pnl_game:DockPadding(15, 0, 5, 0)
+pnl_game:GetCanvas():DockPadding(5, 0, 5, 0)
     panels["GAMEPLAY"] = pnl_game
 
     Empty(pnl_game, 10)
-    local lbl2 = pnl_game:Add("DLabel")
-    lbl2:SetText("GAMEPLAY")
-    lbl2:SetFont("ML_Subtitle")
-    lbl2:SetTextColor(Color(255, 196, 241))
-    lbl2:Dock(TOP)
-    lbl2:SetContentAlignment(5)
+local title_row = pnl_game:Add("DPanel")
+title_row:Dock(TOP)
+title_row:SetTall(20)
+title_row:DockMargin(0, 0, 0, 0)
+title_row.Paint = function() end
+
+local lbl_combat = title_row:Add("DLabel")
+lbl_combat:SetText("                       Combat")
+lbl_combat:SetFont("ML_Subtitle")
+lbl_combat:SetTextColor(Color(255, 196, 241))
+lbl_combat:Dock(LEFT)
+lbl_combat:SetWide(150)
+lbl_combat:SetContentAlignment(4)
+
+
+local lbl_movement = title_row:Add("DLabel")
+lbl_movement:SetText("            Movement")
+lbl_movement:SetFont("ML_Subtitle")
+lbl_movement:SetTextColor(Color(255, 196, 241))
+lbl_movement:Dock(LEFT)
+lbl_movement:SetWide(200) 
+lbl_movement:SetContentAlignment(4)
+
+lbl_movement:DockMargin(110, 0, 0, 0)
 
     Empty(pnl_game, 10)
     CreateCheckbox(pnl_game, "Aimbot", "ml_silent_aim")
     CreateCheckbox(pnl_game, "Propkill Mode", "ml_aimbot")
-    Empty(pnl_game, 10) 
+
+local function CreateWhiteSlider(parent, label, convar, min, max, decimals)
+    local row = parent:Add("DPanel")
+    row:Dock(TOP)
+    row:SetTall(30)
+    row:DockMargin(15, -7, 10, 0)
+    row.Paint = function() end
+
+    local lbl = row:Add("DLabel")
+    lbl:SetText(label)
+    lbl:SetFont("ML_Text")
+    lbl:Dock(LEFT)
+    lbl:SetWide(80) 
+    lbl:SetTextColor(Color(255, 255, 255))
+
+    local slider = row:Add("DNumSlider")
+    slider:Dock(FILL)
+    slider:SetMin(min)
+    slider:SetMax(max)
+    slider:SetDecimals(decimals or 0)
+    slider:SetConVar(convar)
+    slider:SetText("") 
+
+    if IsValid(slider.Slider) then
+        slider.Slider:Dock(LEFT)
+        slider.Slider:SetWide(100)
+    end
+
+    if IsValid(slider.Label) then slider.Label:SetVisible(false) end
+    if IsValid(slider.TextArea) then
+        slider.TextArea:Dock(RIGHT)
+        slider.TextArea:SetWide(250)
+        slider.TextArea:SetTextColor(Color(255, 255, 255))
+        slider.TextArea:SetFont("ML_Text")
+        slider.TextArea:SetDrawBackground(false)
+        slider.TextArea:SetDrawBorder(false)
+        slider.TextArea:DockMargin(10, 0, 0, 0) 
+    end
+    
+    slider.Slider.Paint = function(s, w, h) 
+        surface.SetDrawColor(55, 55, 55) 
+        surface.DrawRect(0, h/2 - 1, w, 2) 
+    end
+    
+    slider.Slider.Knob.Paint = function(s, w, h) 
+        draw.RoundedBox(30, 2, 2, w - 4, h - 4, Color(255, 196, 241)) 
+    end
+
+    slider.Think = function(self)
+        if self.TextArea then
+            self.TextArea:SetTextColor(Color(255, 255, 255))
+            self.TextArea:SetFont("ML_Text")
+        end
+        
+        local val = GetConVar(convar):GetFloat()
+        if self:GetValue() != val and not self.Slider:IsEditing() then
+            self:SetValue(val)
+        end
+    end
+
+    return slider
+end
+
+CreateWhiteSlider(pnl_game, "Aimbot FOV", "ml_aimbot_fov", 0, 180, 0)
+CreateWhiteSlider(pnl_game, "Smoothness", "ml_aimbot_smooth", 0, 2, 2)
+Empty(pnl_game, 10)
     CreateCheckbox(pnl_game, "Bhop", "ml_bhop")
+    local children = pnl_game:GetCanvas():GetChildren()
+local last_cb = children[#children]
+
+if IsValid(last_cb) then
+    last_cb:Dock(TOP)
+    last_cb:DockMargin(250, -96, 0, 0) 
+end
 
     local pnl_misc = vgui.Create("DScrollPanel", content_area)
     pnl_misc:Dock(FILL)
